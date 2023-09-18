@@ -28,11 +28,12 @@ use nannou::{
 };
 use nannou_egui::{egui, Egui};
 
-
+const ARROW_COLOR: rgb::Srgb<u8> = BLACK;
 const BACKGROUND_COLOR: rgb::Srgb<u8> = CORNFLOWERBLUE;
 const SPEED_DEFAULT: f64 = 0.1;
 const STEP_DEFAULT: usize = 50;
 const MAX_ANGLE_DEFAULT: f64 = 2.0 * PI_F64;
+const RUNNING_DEFAULT: bool = true;
 
 fn main() {
     nannou::app(model).update(update).simple_window(view).run();
@@ -40,6 +41,8 @@ fn main() {
 
 struct Model {
     egui: Egui,
+    running: bool,
+    reference_time: f32,
     speed: f64,
     step: usize,
     max_angle: f64,
@@ -60,6 +63,8 @@ fn model(app: &App) -> Model {
     let egui = Egui::from_window(&window);
     Model {
         egui,
+        running: RUNNING_DEFAULT,
+        reference_time: 0_f32,
         speed: SPEED_DEFAULT,
         step: STEP_DEFAULT,
         max_angle: MAX_ANGLE_DEFAULT,
@@ -67,7 +72,7 @@ fn model(app: &App) -> Model {
     }
 }
 
-fn update(_app: &App, model: &mut Model, update: Update) {
+fn update(app: &App, model: &mut Model, update: Update) {
     let egui = &mut model.egui;
     egui.set_elapsed_time(update.since_start);
     let ctx = egui.begin_frame();
@@ -83,6 +88,10 @@ fn update(_app: &App, model: &mut Model, update: Update) {
                 .text("Max angle")
                 .suffix("rad"),
         );
+        if ui.button("Run/Pause").clicked() {
+            model.reference_time = app.time * model.speed as f32 - model.reference_time as f32;
+            model.running = !model.running;
+        }
     });
 }
 
@@ -93,6 +102,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let stroke_weight = 2.;
     let time_factor = model.speed;
     let max_angle = model.max_angle;
+    let perlin_z = if model.running {
+        app.time as f64 * time_factor - model.reference_time as f64
+    } else {
+        model.reference_time as f64
+    };
 
     draw.background().color(BACKGROUND_COLOR);
 
@@ -101,7 +115,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
         for canvas_y in (win.bottom() as i32..win.top() as i32).step_by(step) {
             let perlin_x = win.right() as f64 - canvas_x as f64 / win.w() as f64;
             let perlin_y = win.top() as f64 - canvas_y as f64 / win.h() as f64;
-            let perlin_z = app.time as f64 * time_factor;
             let noise_angle = model.noise.get([perlin_x, perlin_y, perlin_z]) * max_angle;
             let gradient = Vec2::new(1., 0.).rotate(noise_angle as f32) * arrow_width;
             let canvas_point = Vec2::new(canvas_x as f32, canvas_y as f32);
@@ -110,7 +123,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                 .start(canvas_point - offset)
                 .end(canvas_point + offset)
                 .stroke_weight(stroke_weight)
-                .color(BLACK);
+                .color(ARROW_COLOR);
         }
     }
 
