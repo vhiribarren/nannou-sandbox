@@ -33,7 +33,7 @@ type Radian = f64;
 const ARROW_COLOR: rgb::Srgb<u8> = BLACK;
 const BACKGROUND_COLOR: rgb::Srgb<u8> = CORNFLOWERBLUE;
 const SPEED_DEFAULT: f64 = 0.1;
-const STEP_DEFAULT: usize = 50;
+const RESOLUTION_DEFAULT: usize = 50;
 const MAX_ANGLE_DEFAULT: Radian = 2.0 * PI_F64;
 const RUNNING_DEFAULT: bool = true;
 const SHOW_ARROWS_DEFAULT: bool = true;
@@ -44,6 +44,48 @@ fn main() {
     nannou::app(model).update(update).view(view).run();
 }
 
+struct ArrayBuffer<T> {
+    width: usize,
+    height: usize,
+    buffer: Vec<T>,
+}
+
+impl ArrayBuffer<f64> {
+    pub fn new(width: usize, height: usize) -> Self {
+        Self {
+            width,
+            height,
+            buffer: vec![0.0; width * height],
+        }
+    }
+}
+
+impl<T> ArrayBuffer<T> {
+    pub fn get(&self, x: usize, y: usize) -> &T {
+        &self.buffer[y * self.width + x]
+    }
+    pub fn set(&mut self, x: usize, y: usize, val: T) {
+        self.buffer[y * self.width + x] = val;
+    }
+    pub fn len(&self) -> usize {
+        self.width * self.height
+    }
+}
+
+fn gen_noise_texture(width: usize, height: usize, time: f64, frequency: f64) -> ArrayBuffer<f64> {
+    let mut buffer = ArrayBuffer::new(width, height);
+    for y in 0..height {
+        for x in 0..width {
+            let perlin_x = frequency * x as f64 / width as f64;
+            let perlin_y = frequency * y as f64 / height as f64;
+            let noise = Perlin::new().get([perlin_x, perlin_y, time]);
+            buffer.set(x, y, noise);
+        }
+    }
+    buffer
+    // ne pas dépendre du ration de la fenetre, quand on bouge ça doit pas se scaler
+}
+
 struct Model {
     egui: Egui,
     show_arrows: bool,
@@ -51,9 +93,8 @@ struct Model {
     running: bool,
     reference_time: f32,
     speed: f64,
-    step_sample: usize,
+    resolution: usize,
     max_angle: Radian,
-    noise: Box<dyn NoiseFn<[f64; 3]>>,
     frequency: f64,
 }
 
@@ -76,9 +117,8 @@ fn model(app: &App) -> Model {
         show_values: SHOW_VALUES_DEFAULT,
         reference_time: 0_f32,
         speed: SPEED_DEFAULT,
-        step_sample: STEP_DEFAULT,
+        resolution: RESOLUTION_DEFAULT,
         max_angle: MAX_ANGLE_DEFAULT,
-        noise: Box::new(Perlin::new()),
         frequency: FREQUENCY_DEFAULT,
     }
 }
@@ -90,11 +130,11 @@ fn update(app: &App, model: &mut Model, update: Update) {
     egui::Window::new("Settings").show(&ctx, |ui| {
         ui.vertical(|ui| {
             ui.add(
-                egui::Slider::new(&mut model.speed, 0.0..=100.0)
+                egui::Slider::new(&mut model.speed, 0.01..=100.0)
                     .text("Speed")
                     .logarithmic(true),
             );
-            ui.add(egui::Slider::new(&mut model.step_sample, 1..=100).text("Steps"));
+            ui.add(egui::Slider::new(&mut model.resolution, 1..=100).text("Resolution"));
             ui.add(
                 egui::Slider::new(&mut model.max_angle, 0.0..=2.0 * PI_F64)
                     .text("Max angle")
@@ -120,8 +160,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
 fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
-    let step = model.step_sample;
-    let arrow_width = (step - 2) as f32;
+    let step = model.resolution;
+    let arrow_width = step as f32 - 2.0;
     let stroke_weight = 2.;
     let time_factor = model.speed;
     let max_angle = model.max_angle;
@@ -134,29 +174,30 @@ fn view(app: &App, model: &Model, frame: Frame) {
     draw.background().color(BACKGROUND_COLOR);
 
     let win = app.window_rect();
-    for canvas_x in (win.left() as i32..win.right() as i32).step_by(step) {
-        for canvas_y in (win.bottom() as i32..win.top() as i32).step_by(step) {
-            let perlin_x = (win.right() as f64 - canvas_x as f64) / win.w() as f64;
-            let perlin_y = (win.top() as f64 - canvas_y as f64) / win.h() as f64;
-            let noise_angle = model.noise.get([
-                perlin_x * model.frequency,
-                perlin_y * model.frequency,
-                perlin_z,
-            ]) * max_angle;
+    let step_width = win.w() as usize / step + 1;
+    let step_height = win.h() as usize / step + 1;
+    let noise_texture = gen_noise_texture(step_width, step_height, perlin_z, model.frequency);
+
+    for step_x in 0..step_width {
+        for step_y in 0..step_height {
+            let noise_angle = noise_texture.get(step_x, step_y) * max_angle;
             let gradient = Vec2::new(1., 0.).rotate(noise_angle as f32) * arrow_width;
-            let canvas_point = Vec2::new(canvas_x as f32, canvas_y as f32);
-            let offset = Vec2::new(gradient.x / 2., gradient.y / 2.);
             if model.show_values {
                 draw.rect()
                     .color(Rgb::new(noise_angle, noise_angle, noise_angle))
                     .w(step as f32)
                     .h(step as f32)
                     .x_y(
-                        canvas_x as f32 + step as f32 / 2.0,
-                        canvas_y as f32 + step as f32 / 2.0,
+                        (step * step_x) as f32 + step as f32 / 2.0 + win.left(),
+                        (step * step_y) as f32 + step as f32 / 2.0 + win.bottom(),
                     );
             }
             if model.show_arrows {
+                let canvas_point = Vec2::new(
+                    (step * step_x) as f32 + win.left() + step as f32 / 2.0,
+                    (step * step_y) as f32 + win.bottom() + step as f32 / 2.0,
+                );
+                let offset = Vec2::new(gradient.x / 2., gradient.y / 2.);
                 draw.arrow()
                     .start(canvas_point - offset)
                     .end(canvas_point + offset)
