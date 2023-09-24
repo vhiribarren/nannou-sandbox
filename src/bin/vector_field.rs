@@ -30,17 +30,17 @@ use nannou::{
 };
 use nannou_egui::{egui, Egui};
 
-type Radian = f64;
+type Radian = f32;
 
 const ARROW_COLOR: rgb::Srgb<u8> = BLACK;
 const BACKGROUND_COLOR: rgb::Srgb<u8> = CORNFLOWERBLUE;
-const SPEED_DEFAULT: f64 = 0.1;
+const SPEED_DEFAULT: f32 = 0.1;
 const STEP_DEFAULT: usize = 50;
-const MAX_ANGLE_DEFAULT: Radian = 2.0 * PI_F64;
+const MAX_ANGLE_DEFAULT: Radian = 2.0 * PI;
 const RUNNING_DEFAULT: bool = true;
 const SHOW_ARROWS_DEFAULT: bool = true;
 const SHOW_VALUES_DEFAULT: bool = false;
-const FREQUENCY_DEFAULT: f64 = 1.0;
+const FREQUENCY_DEFAULT: f32 = 1.0;
 const PARTICLE_COUNT_DEFAULT: usize = 5_000;
 const PARTICLE_COLOR_DEFAULT: rgb::Srgb<u8> = RED;
 const PARTICLE_SIZE_DEFAULT: f32 = 3.0;
@@ -51,8 +51,8 @@ fn main() {
 }
 
 struct Particle {
-    pub x: f64,
-    pub y: f64,
+    pub x: f32,
+    pub y: f32,
     pub color: rgb::Srgb<u8>,
 }
 
@@ -66,8 +66,8 @@ impl ParticleSystem {
     fn new(container: Rect, noise: Rc<dyn NoiseFn<[f64; 3]>>, count: usize) -> Self {
         let mut particles = vec![];
         for _ in 0..count {
-            let x = random_range(container.left() as f64, container.right() as f64);
-            let y = random_range(container.bottom() as f64, container.top() as f64);
+            let x = random_range(container.left(), container.right());
+            let y = random_range(container.bottom(), container.top());
             particles.push(Particle {
                 x,
                 y,
@@ -80,20 +80,20 @@ impl ParticleSystem {
             container,
         }
     }
-    fn update(&mut self, noise_z: f64, frequency: f64, max_angle: f64) {
+    fn update(&mut self, noise_z: f32, frequency: f32, max_angle: Radian) {
         for particle in &mut self.particles {
             let perlin_x =
-                (self.container.right() as f64 - particle.x) / self.container.w() as f64;
+                (self.container.right() - particle.x) / self.container.w();
             let perlin_y =
-                (self.container.top() as f64 - particle.y) / self.container.h() as f64;
+                (self.container.top() - particle.y) / self.container.h();
 
             let noise_angle = self
                 .noise
-                .get([perlin_x * frequency, perlin_y * frequency, noise_z])
+                .get([(perlin_x * frequency) as f64, (perlin_y * frequency) as f64, noise_z as f64]) as f32
                 * max_angle;
-            let gradient = Vec2::new(1., 0.).rotate(noise_angle as f32) * PARTICLE_MOVE_DELTA;
-            particle.x += gradient.x as f64;
-            particle.y += gradient.y as f64;
+            let gradient = Vec2::new(1., 0.).rotate(noise_angle) * PARTICLE_MOVE_DELTA;
+            particle.x += gradient.x;
+            particle.y += gradient.y;
         }
     }
     fn draw(&self, app: &App, _model: &Model, frame: &Frame) {
@@ -103,7 +103,7 @@ impl ParticleSystem {
                 .color(particle.color)
                 .w(PARTICLE_SIZE_DEFAULT)
                 .h(PARTICLE_SIZE_DEFAULT)
-                .x_y(particle.x as f32, particle.y as f32);
+                .x_y(particle.x, particle.y);
         }
         draw.to_frame(app, frame).unwrap();
     }
@@ -115,11 +115,11 @@ struct Model {
     show_values: bool,
     running: bool,
     reference_time: f32,
-    speed: f64,
+    speed: f32,
     step_sample: usize,
     max_angle: Radian,
     noise: Rc<dyn NoiseFn<[f64; 3]>>,
-    frequency: f64,
+    frequency: f32,
     particle_system: ParticleSystem,
 }
 
@@ -153,7 +153,7 @@ fn model(app: &App) -> Model {
 }
 
 fn update(app: &App, model: &mut Model, update: Update) {
-    let noise_z = noise_z(app, model);
+    let noise_z = noise_z(app, model) as f32;
     model
         .particle_system
         .update(noise_z, model.frequency, model.max_angle);
@@ -169,7 +169,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
             );
             ui.add(egui::Slider::new(&mut model.step_sample, 1..=100).text("Steps"));
             ui.add(
-                egui::Slider::new(&mut model.max_angle, 0.0..=2.0 * PI_F64)
+                egui::Slider::new(&mut model.max_angle, 0.0..=2.0 * PI)
                     .text("Max angle")
                     .suffix("rad"),
             );
@@ -184,7 +184,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 .button(if model.running { "Pause" } else { "Run" })
                 .clicked()
             {
-                model.reference_time = app.time * model.speed as f32 - model.reference_time;
+                model.reference_time = app.time * model.speed - model.reference_time;
                 model.running = !model.running;
             }
         });
@@ -193,7 +193,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
 fn noise_z(app: &App, model: &Model) -> f64 {
     if model.running {
-        app.time as f64 * model.speed - model.reference_time as f64
+        (app.time * model.speed - model.reference_time) as f64
     } else {
         model.reference_time as f64
     }
@@ -212,13 +212,13 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let win = app.window_rect();
     for canvas_x in (win.left() as i32..win.right() as i32).step_by(step) {
         for canvas_y in (win.bottom() as i32..win.top() as i32).step_by(step) {
-            let perlin_x = (win.right() as f64 - canvas_x as f64) / win.w() as f64;
-            let perlin_y = (win.top() as f64 - canvas_y as f64) / win.h() as f64;
+            let perlin_x = (win.right() - canvas_x as f32) / win.w();
+            let perlin_y = (win.top() - canvas_y as f32) / win.h();
             let noise_angle = model.noise.get([
-                perlin_x * model.frequency,
-                perlin_y * model.frequency,
+                (perlin_x * model.frequency) as f64,
+                (perlin_y * model.frequency) as f64,
                 perlin_z,
-            ]) * max_angle;
+            ]) as f32* max_angle;
             let gradient = Vec2::new(1., 0.).rotate(noise_angle as f32) * arrow_width;
             let canvas_point = Vec2::new(canvas_x as f32, canvas_y as f32);
             let offset = Vec2::new(gradient.x / 2., gradient.y / 2.);
