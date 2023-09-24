@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+use std::rc::Rc;
+
 use nannou::{
     noise::{NoiseFn, Perlin},
     prelude::*,
@@ -39,9 +41,72 @@ const RUNNING_DEFAULT: bool = true;
 const SHOW_ARROWS_DEFAULT: bool = true;
 const SHOW_VALUES_DEFAULT: bool = false;
 const FREQUENCY_DEFAULT: f64 = 1.0;
+const PARTICLE_COUNT_DEFAULT: usize = 5_000;
+const PARTICLE_COLOR_DEFAULT: rgb::Srgb<u8> = RED;
+const PARTICLE_SIZE_DEFAULT: f32 = 3.0;
+const PARTICLE_MOVE_DELTA: f32 = 1.0;
 
 fn main() {
     nannou::app(model).update(update).view(view).run();
+}
+
+struct Particle {
+    pub x: f64,
+    pub y: f64,
+    pub color: rgb::Srgb<u8>,
+}
+
+struct ParticleSystem {
+    particles: Vec<Particle>,
+    noise: Rc<dyn NoiseFn<[f64; 3]>>,
+    container: Rect,
+}
+
+impl ParticleSystem {
+    fn new(container: Rect, noise: Rc<dyn NoiseFn<[f64; 3]>>, count: usize) -> Self {
+        let mut particles = vec![];
+        for _ in 0..count {
+            let x = random_range(container.left() as f64, container.right() as f64);
+            let y = random_range(container.bottom() as f64, container.top() as f64);
+            particles.push(Particle {
+                x,
+                y,
+                color: PARTICLE_COLOR_DEFAULT,
+            });
+        }
+        Self {
+            particles,
+            noise,
+            container,
+        }
+    }
+    fn update(&mut self, noise_z: f64, frequency: f64, max_angle: f64) {
+        for particle in &mut self.particles {
+            let perlin_x =
+                (self.container.right() as f64 - particle.x) / self.container.w() as f64;
+            let perlin_y =
+                (self.container.top() as f64 - particle.y) / self.container.h() as f64;
+
+            let noise_angle = self
+                .noise
+                .get([perlin_x * frequency, perlin_y * frequency, noise_z])
+                * max_angle;
+            let gradient = Vec2::new(1., 0.).rotate(noise_angle as f32) * PARTICLE_MOVE_DELTA;
+            particle.x += gradient.x as f64;
+            particle.y += gradient.y as f64;
+        }
+    }
+    fn draw(&self, app: &App, _model: &Model, frame: &Frame) {
+        let draw = app.draw();
+        for particle in &self.particles {
+            draw.rect()
+                .color(particle.color)
+                .w(PARTICLE_SIZE_DEFAULT)
+                .h(PARTICLE_SIZE_DEFAULT)
+                .x_y(particle.x as f32, particle.y as f32);
+        }
+        draw.to_frame(app, frame).unwrap();
+    }
 }
 
 struct Model {
@@ -53,8 +118,9 @@ struct Model {
     speed: f64,
     step_sample: usize,
     max_angle: Radian,
-    noise: Box<dyn NoiseFn<[f64; 3]>>,
+    noise: Rc<dyn NoiseFn<[f64; 3]>>,
     frequency: f64,
+    particle_system: ParticleSystem,
 }
 
 fn model(app: &App) -> Model {
@@ -69,6 +135,8 @@ fn model(app: &App) -> Model {
         .unwrap();
     let window = app.window(window_id).unwrap();
     let egui = Egui::from_window(&window);
+    let noise = Rc::new(Perlin::new());
+    let particle_system = ParticleSystem::new(window.rect(), noise.clone(), PARTICLE_COUNT_DEFAULT);
     Model {
         egui,
         running: RUNNING_DEFAULT,
@@ -78,12 +146,17 @@ fn model(app: &App) -> Model {
         speed: SPEED_DEFAULT,
         step_sample: STEP_DEFAULT,
         max_angle: MAX_ANGLE_DEFAULT,
-        noise: Box::new(Perlin::new()),
+        noise: noise.clone(),
         frequency: FREQUENCY_DEFAULT,
+        particle_system,
     }
 }
 
 fn update(app: &App, model: &mut Model, update: Update) {
+    let noise_z = noise_z(app, model);
+    model
+        .particle_system
+        .update(noise_z, model.frequency, model.max_angle);
     let egui = &mut model.egui;
     egui.set_elapsed_time(update.since_start);
     let ctx = egui.begin_frame();
@@ -118,18 +191,21 @@ fn update(app: &App, model: &mut Model, update: Update) {
     });
 }
 
+fn noise_z(app: &App, model: &Model) -> f64 {
+    if model.running {
+        app.time as f64 * model.speed - model.reference_time as f64
+    } else {
+        model.reference_time as f64
+    }
+}
+
 fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
     let step = model.step_sample;
     let arrow_width = (step - 2) as f32;
     let stroke_weight = 2.;
-    let time_factor = model.speed;
     let max_angle = model.max_angle;
-    let perlin_z = if model.running {
-        app.time as f64 * time_factor - model.reference_time as f64
-    } else {
-        model.reference_time as f64
-    };
+    let perlin_z = noise_z(app, model);
 
     draw.background().color(BACKGROUND_COLOR);
 
@@ -167,5 +243,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
     }
 
     draw.to_frame(app, &frame).unwrap();
+    model.particle_system.draw(app, model, &frame);
     model.egui.draw_to_frame(&frame).unwrap();
 }
