@@ -25,11 +25,15 @@ SOFTWARE.
 use std::rc::Rc;
 
 use nannou::{
+    color::IntoLinSrgba,
     draw::Renderer,
     noise::{NoiseFn, Perlin},
     prelude::*,
 };
-use nannou_egui::{egui, Egui};
+use nannou_egui::{
+    egui::{self},
+    Egui,
+};
 
 type Radian = f32;
 
@@ -38,14 +42,13 @@ const BACKGROUND_COLOR: rgb::Srgb<u8> = CORNFLOWERBLUE;
 const SPEED_DEFAULT: f32 = 0.1;
 const STEP_DEFAULT: usize = 50;
 const MAX_ANGLE_DEFAULT: Radian = 2.0 * PI;
-const RUNNING_DEFAULT: bool = true;
+const RUNNING_DEFAULT: bool = false;
 const SHOW_ARROWS_DEFAULT: bool = true;
 const SHOW_VALUES_DEFAULT: bool = false;
 const FREQUENCY_DEFAULT: f32 = 1.0;
 const PARTICLE_COUNT_DEFAULT: usize = 1_000;
-const PARTICLE_COLOR_DEFAULT: rgb::Srgb<u8> = RED;
-const PARTICLE_SIZE_DEFAULT: f32 = 1.0;
-const PARTICLE_MOVE_DELTA: f32 = 1.0;
+const PARTICLE_SIZE_DEFAULT: f32 = 1.5;
+const PARTICLE_MOVE_DELTA: f32 = 2.0;
 
 fn main() {
     nannou::app(model).update(update).view(view).run();
@@ -64,7 +67,15 @@ struct Model {
     frequency: f32,
     particle_system: ParticleSystem,
     particle_texture: wgpu::Texture,
+    enable_particles: bool,
     renderer: Renderer,
+    angle_color: AngleColor,
+}
+
+#[derive(PartialEq, Debug)]
+enum AngleColor {
+    Gray,
+    HSV,
 }
 
 fn model(app: &App) -> Model {
@@ -108,6 +119,8 @@ fn model(app: &App) -> Model {
         particle_system,
         particle_texture,
         renderer,
+        enable_particles: false,
+        angle_color: AngleColor::Gray,
     }
 }
 
@@ -119,11 +132,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
     let ctx = egui.begin_frame();
     egui::Window::new("Settings").show(&ctx, |ui| {
         ui.vertical(|ui| {
-            ui.add(
-                egui::Slider::new(&mut model.speed, 0.0..=100.0)
-                    .text("Speed")
-                    .logarithmic(true),
-            );
+            ui.heading("Noise control");
             ui.add(egui::Slider::new(&mut model.step_sample, 1..=100).text("Steps"));
             ui.add(
                 egui::Slider::new(&mut model.max_angle, 0.0..=2.0 * PI)
@@ -135,8 +144,23 @@ fn update(app: &App, model: &mut Model, update: Update) {
                     .text("Frequency")
                     .logarithmic(true),
             );
-            ui.checkbox(&mut model.show_arrows, "Show Arrows");
-            ui.checkbox(&mut model.show_values, "Show Values");
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_source("Angle Color Selection")
+                    .selected_text(format!("{:?}", model.angle_color))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut model.angle_color, AngleColor::Gray, "Gray");
+                        ui.selectable_value(&mut model.angle_color, AngleColor::HSV, "Hue");
+                    });
+                ui.checkbox(&mut model.show_values, "Show Values");
+                ui.checkbox(&mut model.show_arrows, "Show Arrows");
+            });
+            ui.separator();
+            ui.heading("Update vector field");
+            ui.add(
+                egui::Slider::new(&mut model.speed, 0.0..=100.0)
+                    .text("Speed")
+                    .logarithmic(true),
+            );
             if ui
                 .button(if model.running { "Pause" } else { "Run" })
                 .clicked()
@@ -144,25 +168,47 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 model.reference_time = app.time * model.speed - model.reference_time;
                 model.running = !model.running;
             }
+            ui.separator();
+            ui.heading("Particles");
+            ui.horizontal(|ui| {
+                if ui.button("Reset particles").clicked() {
+                    model.particle_system.reset();
+                    model.particle_texture = wgpu::TextureBuilder::new()
+                        .size([
+                            app.main_window().rect().w() as u32,
+                            app.main_window().rect().h() as u32,
+                        ])
+                        .usage(
+                            wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::TEXTURE_BINDING,
+                        )
+                        .sample_count(1) //.sample_count(window.msaa_samples())
+                        .format(wgpu::TextureFormat::Rgba16Float)
+                        .build(app.main_window().device());
+                }
+                ui.checkbox(&mut model.enable_particles, "Enable particles");
+            });
         });
     });
 
-    let draw = app.draw();
-    let window = app.main_window();
-    let device = window.device();
-    let ce_desc = wgpu::CommandEncoderDescriptor {
-        label: Some("texture renderer"),
-    };
-    let mut encoder = device.create_command_encoder(&ce_desc);
+    if model.enable_particles {
+        let draw = app.draw();
+        let window = app.main_window();
+        let device = window.device();
+        let ce_desc = wgpu::CommandEncoderDescriptor {
+            label: Some("texture renderer"),
+        };
+        let mut encoder = device.create_command_encoder(&ce_desc);
 
-    model
-        .particle_system
-        .update(noise_z, model.frequency, model.max_angle);
-    model.particle_system.draw(&draw);
-    model
-        .renderer
-        .render_to_texture(device, &mut encoder, &draw, &model.particle_texture);
-    window.queue().submit(Some(encoder.finish()));
+        model
+            .particle_system
+            .update(noise_z, model.frequency, model.max_angle);
+        model.particle_system.draw(&draw);
+        model
+            .renderer
+            .render_to_texture(device, &mut encoder, &draw, &model.particle_texture);
+        window.queue().submit(Some(encoder.finish()));
+    }
 }
 
 fn noise_z(app: &App, model: &Model) -> f64 {
@@ -183,7 +229,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let perlin_z = noise_z(app, model);
 
     draw.background().color(BACKGROUND_COLOR);
-    draw.texture(&model.particle_texture);
 
     for canvas_x in (win.left() as i32..win.right() as i32).step_by(step) {
         for canvas_y in (win.bottom() as i32..win.top() as i32).step_by(step) {
@@ -199,15 +244,21 @@ fn view(app: &App, model: &Model, frame: Frame) {
             let canvas_point = Vec2::new(canvas_x as f32, canvas_y as f32);
             let offset = Vec2::new(gradient.x / 2., gradient.y / 2.);
             if model.show_values {
-                draw.rect()
-                    .color(Rgb::new(noise_angle, noise_angle, noise_angle))
-                    .w(step as f32)
-                    .h(step as f32)
-                    .x_y(
-                        canvas_x as f32 + step as f32 / 2.0,
-                        canvas_y as f32 + step as f32 / 2.0,
-                    );
+                let color = match model.angle_color {
+                    AngleColor::Gray => {
+                        let gray = (noise_angle.cos() + 1.0) / 2.0;
+                        Rgb::new(gray, gray, gray).into_lin_srgba()
+                    }
+                    AngleColor::HSV => {
+                        Hsv::new(noise_angle * 360.0 / (2. * PI), 1.0, 1.0).into_lin_srgba()
+                    }
+                };
+                draw.rect().color(color).w(step as f32).h(step as f32).x_y(
+                    canvas_x as f32 + step as f32 / 2.0,
+                    canvas_y as f32 + step as f32 / 2.0,
+                );
             }
+
             if model.show_arrows {
                 draw.arrow()
                     .start(canvas_point - offset)
@@ -217,7 +268,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             }
         }
     }
-
+    draw.texture(&model.particle_texture);
     draw.to_frame(app, &frame).unwrap();
     model.egui.draw_to_frame(&frame).unwrap();
 }
@@ -232,25 +283,32 @@ struct ParticleSystem {
     particles: Vec<Particle>,
     noise: Rc<dyn NoiseFn<[f64; 3]>>,
     container: Rect,
+    count: usize,
 }
 
 impl ParticleSystem {
     fn new(container: Rect, noise: Rc<dyn NoiseFn<[f64; 3]>>, count: usize) -> Self {
+        let mut particle_system = Self {
+            particles: Vec::with_capacity(count),
+            noise,
+            count,
+            container,
+        };
+        particle_system.reset();
+        particle_system
+    }
+    fn reset(&mut self) {
         let mut particles = vec![];
-        for _ in 0..count {
-            let x = random_range(container.left(), container.right());
-            let y = random_range(container.bottom(), container.top());
+        for _ in 0..self.count {
+            let x = random_range(self.container.left(), self.container.right());
+            let y = random_range(self.container.bottom(), self.container.top());
             particles.push(Particle {
                 x,
                 y,
-                color: PARTICLE_COLOR_DEFAULT,
+                color: Rgb::new(random(), random(), random()),
             });
         }
-        Self {
-            particles,
-            noise,
-            container,
-        }
+        self.particles = particles;
     }
     fn update(&mut self, noise_z: f32, frequency: f32, max_angle: Radian) {
         for particle in &mut self.particles {
