@@ -34,8 +34,10 @@ use nannou_egui::{
     egui::{self},
     Egui,
 };
-
-type Radian = f32;
+use vector_field::{
+    particles::{simple::SimpleParticleSystem, ParticleSystem},
+    Radian,
+};
 
 const ARROW_COLOR: rgb::Srgb<u8> = BLACK;
 const BACKGROUND_COLOR: rgb::Srgb<u8> = CORNFLOWERBLUE;
@@ -47,8 +49,6 @@ const SHOW_ARROWS_DEFAULT: bool = true;
 const SHOW_VALUES_DEFAULT: bool = false;
 const FREQUENCY_DEFAULT: f32 = 1.0;
 const PARTICLE_COUNT_DEFAULT: usize = 1_000;
-const PARTICLE_SIZE_DEFAULT: f32 = 1.5;
-const PARTICLE_MOVE_DELTA: f32 = 2.0;
 
 fn main() {
     nannou::app(model).update(update).view(view).run();
@@ -65,13 +65,14 @@ struct Model {
     max_angle: Radian,
     noise: Rc<dyn NoiseFn<[f64; 3]>>,
     frequency: f32,
-    particle_system: ParticleSystem,
+    particle_system: Box<dyn ParticleSystem>,
     particle_texture: wgpu::Texture,
     enable_particles: bool,
     renderer: Renderer,
     angle_color: AngleColor,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(PartialEq, Debug)]
 enum AngleColor {
     Gray,
@@ -93,7 +94,11 @@ fn model(app: &App) -> Model {
     };
     let egui = Egui::from_window(&window);
     let noise = Rc::new(Perlin::new());
-    let particle_system = ParticleSystem::new(window.rect(), noise.clone(), PARTICLE_COUNT_DEFAULT);
+    let particle_system = Box::new(SimpleParticleSystem::new(
+        window.rect(),
+        noise.clone(),
+        PARTICLE_COUNT_DEFAULT,
+    ));
     let particle_texture = wgpu::TextureBuilder::new()
         .size([window.rect().w() as u32, window.rect().h() as u32])
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
@@ -271,68 +276,4 @@ fn view(app: &App, model: &Model, frame: Frame) {
     draw.texture(&model.particle_texture);
     draw.to_frame(app, &frame).unwrap();
     model.egui.draw_to_frame(&frame).unwrap();
-}
-
-struct Particle {
-    pub x: f32,
-    pub y: f32,
-    pub color: rgb::Srgb<u8>,
-}
-
-struct ParticleSystem {
-    particles: Vec<Particle>,
-    noise: Rc<dyn NoiseFn<[f64; 3]>>,
-    container: Rect,
-    count: usize,
-}
-
-impl ParticleSystem {
-    fn new(container: Rect, noise: Rc<dyn NoiseFn<[f64; 3]>>, count: usize) -> Self {
-        let mut particle_system = Self {
-            particles: Vec::with_capacity(count),
-            noise,
-            count,
-            container,
-        };
-        particle_system.reset();
-        particle_system
-    }
-    fn reset(&mut self) {
-        let mut particles = vec![];
-        for _ in 0..self.count {
-            let x = random_range(self.container.left(), self.container.right());
-            let y = random_range(self.container.bottom(), self.container.top());
-            particles.push(Particle {
-                x,
-                y,
-                color: Rgb::new(random(), random(), random()),
-            });
-        }
-        self.particles = particles;
-    }
-    fn update(&mut self, noise_z: f32, frequency: f32, max_angle: Radian) {
-        for particle in &mut self.particles {
-            let perlin_x = (self.container.right() - particle.x) / self.container.w();
-            let perlin_y = (self.container.top() - particle.y) / self.container.h();
-
-            let noise_angle = self.noise.get([
-                (perlin_x * frequency) as f64,
-                (perlin_y * frequency) as f64,
-                noise_z as f64,
-            ]) as f32
-                * max_angle;
-            let gradient = Vec2::new(1., 0.).rotate(noise_angle) * PARTICLE_MOVE_DELTA;
-            particle.x += gradient.x;
-            particle.y += gradient.y;
-        }
-    }
-    fn draw(&self, draw: &Draw) {
-        for particle in &self.particles {
-            draw.rect()
-                .color(particle.color)
-                .w(PARTICLE_SIZE_DEFAULT)
-                .h(PARTICLE_SIZE_DEFAULT)
-                .x_y(particle.x, particle.y);
-        }
-    }
 }
