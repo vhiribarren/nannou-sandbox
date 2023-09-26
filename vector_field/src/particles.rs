@@ -23,6 +23,7 @@ SOFTWARE.
 */
 
 use nannou::Draw;
+use nannou_egui::egui::Ui;
 
 use crate::Radian;
 
@@ -32,4 +33,5 @@ pub trait ParticleSystem {
     fn reset(&mut self);
     fn update(&mut self, noise_z: f32, frequency: f32, max_angle: Radian);
     fn draw(&self, draw: &Draw);
+    fn config_gui(&mut self, ui: &mut Ui);
 }

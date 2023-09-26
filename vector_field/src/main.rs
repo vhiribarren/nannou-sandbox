@@ -48,7 +48,6 @@ const RUNNING_DEFAULT: bool = false;
 const SHOW_ARROWS_DEFAULT: bool = true;
 const SHOW_VALUES_DEFAULT: bool = false;
 const FREQUENCY_DEFAULT: f32 = 1.0;
-const PARTICLE_COUNT_DEFAULT: usize = 1_000;
 
 fn main() {
     nannou::app(model).update(update).view(view).run();
@@ -94,11 +93,7 @@ fn model(app: &App) -> Model {
     };
     let egui = Egui::from_window(&window);
     let noise = Rc::new(Perlin::new());
-    let particle_system = Box::new(SimpleParticleSystem::new(
-        window.rect(),
-        noise.clone(),
-        PARTICLE_COUNT_DEFAULT,
-    ));
+    let particle_system = Box::new(SimpleParticleSystem::new(window.rect(), noise.clone()));
     let particle_texture = wgpu::TextureBuilder::new()
         .size([window.rect().w() as u32, window.rect().h() as u32])
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
@@ -193,6 +188,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 }
                 ui.checkbox(&mut model.enable_particles, "Enable particles");
             });
+            model.particle_system.config_gui(ui);
         });
     });
 

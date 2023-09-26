@@ -25,11 +25,13 @@ SOFTWARE.
 use std::rc::Rc;
 
 use nannou::{noise::NoiseFn, prelude::*, rand::random_range};
+use nannou_egui::egui;
 
 use crate::Radian;
 
 use super::ParticleSystem;
 
+const PARTICLE_COUNT_DEFAULT: usize = 1_000;
 const PARTICLE_SIZE_DEFAULT: f32 = 1.5;
 const PARTICLE_MOVE_DELTA: f32 = 2.0;
 
@@ -44,14 +46,18 @@ pub struct SimpleParticleSystem {
     noise: Rc<dyn NoiseFn<[f64; 3]>>,
     container: Rect,
     count: usize,
+    move_delta: f32,
+    default_size: f32,
 }
 
 impl SimpleParticleSystem {
-    pub fn new(container: Rect, noise: Rc<dyn NoiseFn<[f64; 3]>>, count: usize) -> Self {
+    pub fn new(container: Rect, noise: Rc<dyn NoiseFn<[f64; 3]>>) -> Self {
         let mut particle_system = Self {
-            particles: Vec::with_capacity(count),
+            particles: Vec::with_capacity(PARTICLE_COUNT_DEFAULT),
             noise,
-            count,
+            count: PARTICLE_COUNT_DEFAULT,
+            move_delta: PARTICLE_MOVE_DELTA,
+            default_size: PARTICLE_SIZE_DEFAULT,
             container,
         };
         particle_system.reset();
@@ -84,7 +90,7 @@ impl ParticleSystem for SimpleParticleSystem {
                 noise_z as f64,
             ]) as f32
                 * max_angle;
-            let gradient = Vec2::new(1., 0.).rotate(noise_angle) * PARTICLE_MOVE_DELTA;
+            let gradient = Vec2::new(1., 0.).rotate(noise_angle) * self.move_delta;
             particle.x += gradient.x;
             particle.y += gradient.y;
         }
@@ -93,9 +99,25 @@ impl ParticleSystem for SimpleParticleSystem {
         for particle in &self.particles {
             draw.rect()
                 .color(particle.color)
-                .w(PARTICLE_SIZE_DEFAULT)
-                .h(PARTICLE_SIZE_DEFAULT)
+                .w(self.default_size)
+                .h(self.default_size)
                 .x_y(particle.x, particle.y);
         }
+    }
+    fn config_gui(&mut self, ui: &mut egui::Ui) {
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut self.count).speed(10));
+                ui.label("particles");
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut self.move_delta));
+                ui.label("move delta");
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut self.default_size).clamp_range(0.0..=100.0));
+                ui.label("size");
+            });
+        });
     }
 }
