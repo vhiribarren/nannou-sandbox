@@ -69,8 +69,8 @@ impl ParticleSystem for SimpleParticleSystem {
     fn reset(&mut self) {
         let mut particles = vec![];
         for _ in 0..self.count {
-            let x = random_range(self.container.left(), self.container.right());
-            let y = random_range(self.container.bottom(), self.container.top());
+            let x = 1.5*random_range(self.container.left(), self.container.right());
+            let y = 1.5*random_range(self.container.bottom(), self.container.top());
             particles.push(Particle {
                 x,
                 y,
