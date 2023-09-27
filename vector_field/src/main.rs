@@ -69,6 +69,7 @@ struct Model {
     enable_particles: bool,
     renderer: Renderer,
     angle_color: AngleColor,
+    particle_draw_speed: u8,
 }
 
 #[allow(clippy::upper_case_acronyms)]
@@ -121,6 +122,7 @@ fn model(app: &App) -> Model {
         renderer,
         enable_particles: false,
         angle_color: AngleColor::Gray,
+        particle_draw_speed: 1,
     }
 }
 
@@ -170,6 +172,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
             }
             ui.separator();
             ui.heading("Particles");
+            ui.add(egui::Slider::new(&mut model.particle_draw_speed, 1..=100).text("Draw speed"));
             ui.horizontal(|ui| {
                 if ui.button("Reset particles").clicked() {
                     model.particle_system.reset();
@@ -194,17 +197,18 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
     if model.enable_particles {
         let draw = app.draw();
+        for _ in 0..model.particle_draw_speed {
+            model
+                .particle_system
+                .update(noise_z, model.frequency, model.max_angle);
+            model.particle_system.draw(&draw);
+        }
         let window = app.main_window();
         let device = window.device();
         let ce_desc = wgpu::CommandEncoderDescriptor {
             label: Some("texture renderer"),
         };
         let mut encoder = device.create_command_encoder(&ce_desc);
-
-        model
-            .particle_system
-            .update(noise_z, model.frequency, model.max_angle);
-        model.particle_system.draw(&draw);
         model
             .renderer
             .render_to_texture(device, &mut encoder, &draw, &model.particle_texture);
